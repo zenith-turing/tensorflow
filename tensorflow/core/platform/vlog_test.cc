@@ -14,7 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 // Test that popens a child process with the VLOG-ing environment variable set
-// for the logging framework, and observes VLOG_IS_ON and VLOG macro output.
+// for the logging framework, and observes changes to the global vlog level.
 
 #include <stdio.h>
 #include <string.h>
@@ -34,28 +34,20 @@ namespace {
 
 int RealMain(const char* argv0, bool do_vlog) {
   if (do_vlog) {
-    // Print info on which VLOG levels are activated.
-    fprintf(stderr, "VLOG_IS_ON(8)? %d\n", VLOG_IS_ON(8));
-    fprintf(stderr, "VLOG_IS_ON(7)? %d\n", VLOG_IS_ON(7));
-    fprintf(stderr, "VLOG_IS_ON(6)? %d\n", VLOG_IS_ON(6));
-    // Do some VLOG-ing.
-    VLOG(8) << "VLOG(8)";
-    VLOG(7) << "VLOG(7)";
-    VLOG(6) << "VLOG(6)";
-    LOG(INFO) << "INFO";
+    VLOG(1) << "Level 1";
+    VLOG(2) << "Level 2";
+    VLOG(3) << "Level 3";
     return EXIT_SUCCESS;
   }
 
   // Popen the child process.
   std::string command = std::string(argv0);
 #if defined(PLATFORM_GOOGLE)
-  command = command + " do_vlog --vmodule=vmodule_test=7 --alsologtostderr";
+  command = command + " do_vlog --v=2 --alsologtostderr";
 #elif defined(PLATFORM_WINDOWS)
-  command = "set TF_CPP_VMODULE=vmodule_test=7,shoobadooba=3 && " + command +
-            " do_vlog";
+  command = "set TF_CPP_MAX_VLOG_LEVEL=2 && " + command + " do_vlog";
 #else
-  command =
-      "TF_CPP_VMODULE=vmodule_test=7,shoobadooba=3 " + command + " do_vlog";
+  command = "TF_CPP_MAX_VLOG_LEVEL=2 " + command + " do_vlog";
 #endif
   command += " 2>&1";
   fprintf(stderr, "Running: \"%s\"\n", command.c_str());
@@ -81,21 +73,9 @@ int RealMain(const char* argv0, bool do_vlog) {
     return EXIT_FAILURE;
   }
 
-  // Check output is as expected.
-  const char kExpected[] =
-      "VLOG_IS_ON(8)? 0\nVLOG_IS_ON(7)? 1\nVLOG_IS_ON(6)? 1\n";
-  if (strstr(buffer, kExpected) == nullptr) {
-    fprintf(stderr, "error: unexpected output from child: \"%.*s\"\n",
-            kBufferSizeBytes, buffer);
-    fprintf(stderr,
-            "\n\nCould not find string \"%s\" in the above log buffer.\n[  "
-            "FAILED  ]\n",
-            kExpected);
-    return EXIT_FAILURE;
-  }
-  bool ok = strstr(buffer, "VLOG(7)\n") != nullptr &&
-            strstr(buffer, "VLOG(6)\n") != nullptr &&
-            strstr(buffer, "VLOG(8)\n") == nullptr;
+  bool ok = strstr(buffer, "Level 1") != nullptr &&
+            strstr(buffer, "Level 2") != nullptr &&
+            strstr(buffer, "Level 3") == nullptr;
   if (!ok) {
     fprintf(stderr, "error: VLOG output not as expected: \"%.*s\"\n",
             kBufferSizeBytes, buffer);
@@ -105,7 +85,6 @@ int RealMain(const char* argv0, bool do_vlog) {
     return EXIT_FAILURE;
   }
 
-  // Success!
   fprintf(stderr, "\n[  PASSED  ]\n");
   return EXIT_SUCCESS;
 }
