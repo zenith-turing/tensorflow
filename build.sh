@@ -1,0 +1,1 @@
+bazelisk build -c opt //tensorflow:tensorflow_cc
