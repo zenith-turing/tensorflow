@@ -75,6 +75,26 @@ bool IsTritonSupportedDataType(PrimitiveType type,
                                          return cc.has_bf16_dtype_support();
                                        }},
                         gpu_version);
+    case F8E5M2:
+      return std::visit(
+          VariantVisitor{
+              [](const se::CudaComputeCapability& cc) {
+                return cc.major >=
+                       stream_executor::CudaComputeCapability::AMPERE;
+              },
+              [](const se::RocmComputeCapability& cc) { return false; }},
+          gpu_version);
+
+    case F8E4M3FN:
+      return std::visit(
+          VariantVisitor{
+              [](const se::CudaComputeCapability& cc) {
+                return cc.major >=
+                       stream_executor::CudaComputeCapability::HOPPER;
+              },
+              [](const se::RocmComputeCapability& cc) { return false; }},
+          gpu_version);
+
     default:
       return false;
   }
@@ -224,6 +244,25 @@ CodegenDecision CanTritonHandleGEMM(
       case F16:
       case F32:
         return true;
+      case F8E5M2:
+        return std::visit(
+            VariantVisitor{
+                [](const se::CudaComputeCapability& cc) {
+                  return cc.major >=
+                         stream_executor::CudaComputeCapability::AMPERE;
+                },
+                [](const se::RocmComputeCapability& cc) { return false; }},
+            gpu_version);
+
+      case F8E4M3FN:
+        return std::visit(
+            VariantVisitor{
+                [](const se::CudaComputeCapability& cc) {
+                  return cc.major >=
+                         stream_executor::CudaComputeCapability::HOPPER;
+                },
+                [](const se::RocmComputeCapability& cc) { return false; }},
+            gpu_version);
       case BF16:
         if (cuda_compute_capability) {
           return true;

@@ -416,63 +416,111 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values(HloOpcode::kSelect)),
     TestParamsToString);
 
-using DotTest = TritonSupportTestWithParam;
-
-TEST_P(DotTest, IsTritonSupportedExecutesCorrectlyForDot) {
-  PrimitiveType data_type;
-  HloOpcode opcode;
-  std::tie(data_type, opcode) = GetParam();
-  if (!GetCudaComputeCapability().IsAtLeast(
-          se::CudaComputeCapability::AMPERE) &&
-      data_type == BF16) {
-    GTEST_SKIP() << "No BF16 before Ampere.";
+bool CombinationCrashesTriton(
+    PrimitiveType lhs_type, PrimitiveType rhs_type, PrimitiveType output_type,
+    se::CudaComputeCapability cuda_compute_capability) {
+  if (!cuda_compute_capability.IsAtLeastHopper() &&
+      (lhs_type == F8E4M3FN || rhs_type == F8E4M3FN ||
+       output_type == F8E4M3FN)) {
+    return true;
   }
+  return false;
+}
 
-  const std::string kHloTestTemplate = R"(
+class DotTest : public TritonSupportTestWithParam {
+ protected:
+  void TestDotWithTypes(PrimitiveType lhs_type, PrimitiveType rhs_type,
+                        PrimitiveType output_type) {
+    if (!GetCudaComputeCapability().IsAtLeast(
+            se::CudaComputeCapability::AMPERE) &&
+        lhs_type == BF16) {
+      GTEST_SKIP() << "No BF16 before Ampere.";
+    }
+    const HloOpcode opcode = HloOpcode::kDot;
+    const std::string lhs =
+        primitive_util::LowercasePrimitiveTypeName(lhs_type);
+    const std::string rhs =
+        primitive_util::LowercasePrimitiveTypeName(rhs_type);
+    const std::string output =
+        primitive_util::LowercasePrimitiveTypeName(output_type);
+
+    const std::string kHloTestTemplate = R"(
 triton_gemm___computation {
   parameter_0 = $0[92,11]{1,0} parameter(0)
-  parameter_1 = $0[11,63]{1,0} parameter(1)
-  ROOT dot = $0[92,63]{1,0} $1(parameter_0, parameter_1),
+  parameter_1 = $1[11,63]{1,0} parameter(1)
+  ROOT dot = $2[92,63]{1,0} $3(parameter_0, parameter_1),
     lhs_contracting_dims={1}, rhs_contracting_dims={0}
 }
 
 ENTRY e {
   parameter_0 = $0[92,11]{1,0} parameter(0)
-  parameter_1 = $0[11,63]{1,0} parameter(1)
-  ROOT triton_gemm = $0[92,63]{1,0} fusion(parameter_0, parameter_1), kind=kCustom,
+  parameter_1 = $1[11,63]{1,0} parameter(1)
+  ROOT triton_gemm = $2[92,63]{1,0} fusion(parameter_0, parameter_1), kind=kCustom,
     calls=triton_gemm___computation,
     backend_config={"fusion_backend_config":{"kind":"__triton_gemm"}}
 })";
-  const std::string hlo_test = absl::Substitute(
-      kHloTestTemplate, primitive_util::LowercasePrimitiveTypeName(data_type),
-      HloOpcodeString(opcode));
-  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
-                          ParseAndReturnVerifiedModule(hlo_test));
-  const HloFusionInstruction* fusion = Cast<HloFusionInstruction>(
-      module->entry_computation()->root_instruction());
-  const HloComputation* computation = fusion->fused_instructions_computation();
-  ASSERT_TRUE(computation != nullptr);
-  const HloInstruction* instr =
-      hlo_query::GetFirstInstructionWithOpcode(*computation, opcode);
-  if (IsTritonSupportedInstruction(*instr, GetCudaComputeCapability())) {
-    TF_EXPECT_OK(ApplyFloatNormalization(module.get()));
-    EXPECT_TRUE(RunAndCompareNoHloPasses(
-        std::move(module), ErrorSpec{/*aabs=*/2e-4, /*arel=*/2e-4}));
-  } else {
-    const se::DeviceDescription dev_info =
-        TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
-    EXPECT_THAT(TritonWrapper(*TritonFusionAnalysis::Execute(*computation),
-                              "test_fn", fusion, GetCudaComputeCapability(),
-                              dev_info, config_, /*output_tile_sizes=*/{},
-                              &llvm_module_, &EmitMatMul, mlir_context_),
-                tsl::testing::StatusIs(
-                    absl::StatusCode::kInternal,
-                    ::testing::HasSubstr("Failed to compile Triton kernel")));
+    const std::string hlo_test = absl::Substitute(
+        kHloTestTemplate, lhs, rhs, output, HloOpcodeString(opcode));
+    TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
+                            ParseAndReturnVerifiedModule(hlo_test));
+    const HloFusionInstruction* fusion = Cast<HloFusionInstruction>(
+        module->entry_computation()->root_instruction());
+    const HloComputation* computation =
+        fusion->fused_instructions_computation();
+    ASSERT_TRUE(computation != nullptr);
+    const HloInstruction* instr =
+        hlo_query::GetFirstInstructionWithOpcode(*computation, opcode);
+    LOG(INFO) << "instr: " << instr->ToString();
+    if (IsTritonSupportedInstruction(*instr, GetCudaComputeCapability())) {
+      TF_EXPECT_OK(ApplyFloatNormalization(module.get()));
+      EXPECT_TRUE(RunAndCompareNoHloPasses(
+          std::move(module),
+          ErrorSpec{/*aabs=*/primitive_util::IsF8Type(lhs_type) ? 1.0 : 2e-4,
+                    /*arel=*/2e-4}));
+    } else {
+      if (CombinationCrashesTriton(lhs_type, rhs_type, output_type,
+                                   GetCudaComputeCapability())) {
+        return;
+      }
+      const se::DeviceDescription dev_info =
+          TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
+      EXPECT_THAT(TritonWrapper(*TritonFusionAnalysis::Execute(*computation),
+                                "test_fn", fusion, GetCudaComputeCapability(),
+                                dev_info, config_, /*output_tile_sizes=*/{},
+                                &llvm_module_, &EmitMatMul, mlir_context_),
+                  tsl::testing::StatusIs(
+                      absl::StatusCode::kInternal,
+                      ::testing::HasSubstr("Failed to compile Triton kernel")));
+    }
+  }
+};
+
+TEST_P(DotTest, IsTritonSupportedExecutesCorrectlyForDot) {
+  PrimitiveType data_type;
+  HloOpcode opcode;
+  std::tie(data_type, opcode) = GetParam();
+  CHECK_EQ(opcode, HloOpcode::kDot);
+  TestDotWithTypes(data_type, data_type, data_type);
+
+  switch (data_type) {
+    case F8E5M2:
+      TestDotWithTypes(F8E5M2, F8E4M3FN, F32);
+      TestDotWithTypes(F8E5M2, F8E5M2, F16);
+      TestDotWithTypes(F8E5M2, F8E5M2, F32);
+      break;
+    case F8E4M3FN:
+      TestDotWithTypes(F8E4M3FN, F8E5M2, F32);
+      TestDotWithTypes(F8E4M3FN, F8E4M3FN, F16);
+      TestDotWithTypes(F8E4M3FN, F8E4M3FN, F32);
+      break;
+    default:
+      break;
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(DotTestTestSuite, DotTest,
-                         ::testing::Combine(::testing::Values(F16, F32, BF16),
+                         ::testing::Combine(::testing::Values(F16, F32, BF16,
+                                                              F8E5M2, F8E4M3FN),
                                             ::testing::Values(HloOpcode::kDot)),
                          TestParamsToString);
 

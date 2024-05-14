@@ -1,0 +1,31 @@
+diff --git a/test/Conversion/tritongpu_to_llvm_hopper.mlir b/test/Conversion/tritongpu_to_llvm_hopper.mlir
+--- a/test/Conversion/tritongpu_to_llvm_hopper.mlir
++++ b/test/Conversion/tritongpu_to_llvm_hopper.mlir
+@@ -228,3 +228,27 @@ module attributes {"triton_gpu.target" =
+     tt.return
+   }
+ }
++
++// -----
++
++// Check that Triton uses incorrect type to map to NVIDIA .e4m3 type (b/345700241). When this test fails, change the mapping in ir_emitter_triton.cc
++#blocked = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 32], warpsPerCTA = [1, 1], order = [1, 0]}>
++#blocked1 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [16, 2], warpsPerCTA = [1, 1], order = [1, 0]}>
++#blocked2 = #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [8, 4], warpsPerCTA = [1, 1], order = [1, 0]}>
++#mma = #triton_gpu.nvidia_mma<{versionMajor = 2, versionMinor = 0, warpsPerCTA = [1, 1], instrShape = [16, 8]}>
++#shared = #triton_gpu.shared<{vec = 16, perPhase = 1, maxPhase = 8, order = [1, 0], hasLeadingOffset = false}>
++#shared1 = #triton_gpu.shared<{vec = 8, perPhase = 8, maxPhase = 2, order = [1, 0], hasLeadingOffset = false}>
++// CHECK-LABEL: e4m3_mapping
++module attributes {"triton_gpu.compute-capability" = 90 : i32, "triton_gpu.num-ctas" = 1 : i32, "triton_gpu.num-warps" = 1 : i32, "triton_gpu.threads-per-warp" = 32 : i32} {
++  tt.func @e4m3_mapping(%arg0: tensor<16x256xf8E4M3FNUZ, #blocked>, %arg1: tensor<256x16xf8E4M3FNUZ, #blocked1>) {
++    %83 = triton_gpu.local_alloc %arg0 : (tensor<16x256xf8E4M3FNUZ, #blocked>) -> !tt.memdesc<16x256xf8E4M3FNUZ, #shared, #triton_gpu.shared_memory>
++    %88 = triton_gpu.local_alloc %arg1 : (tensor<256x16xf8E4M3FNUZ, #blocked1>) -> !tt.memdesc<256x16xf8E4M3FNUZ, #shared1, #triton_gpu.shared_memory>
++    %89 = triton_gpu.local_load %83 : !tt.memdesc<16x256xf8E4M3FNUZ, #shared, #triton_gpu.shared_memory> -> tensor<16x256xf8E4M3FNUZ, #triton_gpu.dot_op<{opIdx = 0, parent = #mma, kWidth = 4}>>
++    %91 = triton_gpu.local_load %88 : !tt.memdesc<256x16xf8E4M3FNUZ, #shared1, #triton_gpu.shared_memory> -> tensor<256x16xf8E4M3FNUZ, #triton_gpu.dot_op<{opIdx = 1, parent = #mma, kWidth = 4}>>
++    %cst = arith.constant dense<0.000000e+00> : tensor<16x16xf32, #mma>
++    // CHECK: mma.{{.*}}.e4m3.e4m3.f32
++    %93 = tt.dot %89, %91, %cst {allowTF32 = true, maxNumImpreciseAcc = 0 : i32} : tensor<16x256xf8E4M3FNUZ, #triton_gpu.dot_op<{opIdx = 0, parent = #mma, kWidth = 4}>> *
++                                                                                   tensor<256x16xf8E4M3FNUZ, #triton_gpu.dot_op<{opIdx = 1, parent = #mma, kWidth = 4}>> -> tensor<16x16xf32, #mma>
++    tt.return
++  }
++}
