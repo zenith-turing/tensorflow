@@ -56,7 +56,7 @@ struct MlirToHloConversionOptions {
   // are converted to a tuple even when there is only a single return value.
   // Multiple return values are always converted to a tuple and returned as a
   // single value.
-  bool return_tuple = true;
+  bool return_tuple = false;
 };
 
 // Prefer `ConvertMlirHloToHloModule` over this method when possible, as it
