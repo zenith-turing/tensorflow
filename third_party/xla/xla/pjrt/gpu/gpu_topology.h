@@ -43,11 +43,16 @@ class GpuTopology {
            num_devices_per_host_ == other.num_devices_per_host_;
   }
 
-  int number_of_devices() const {
-    return number_of_hosts() * num_devices_per_host_;
+  bool is_multi_host_valid() const {
+    return num_slices_ != -1 && num_hosts_per_slice_ != -1 &&
+           num_devices_per_host_ != -1;
   }
+
+  int number_of_devices() const { return devices_ids_.size(); }
   const std::vector<int>& device_ids() const { return devices_ids_; }
-  int number_of_hosts() const { return num_slices_ * num_hosts_per_slice_; }
+  int number_of_hosts() const {
+    return is_multi_host_valid() ? num_slices_ * num_hosts_per_slice_ : 1;
+  }
 
   static std::unique_ptr<const GpuTopology> FromProto(
       const GpuTopologyProto& proto);

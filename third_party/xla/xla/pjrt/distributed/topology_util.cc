@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/pjrt/distributed/topology_util.h"
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <string>
@@ -208,6 +209,7 @@ absl::StatusOr<GpuTopologyProto> BuildGpuTopology(
   GpuTopologyProto gpu_topology;
   std::map<int, std::vector<int>> slice_id_to_node_ids;
   std::vector<int> device_ids;
+  bool build_by_device_ids = false;
   for (int i = 0; i < global_topology.nodes_size(); ++i) {
     const LocalTopologyProto& local_topology = global_topology.nodes(i);
 
@@ -222,9 +224,13 @@ absl::StatusOr<GpuTopologyProto> BuildGpuTopology(
       // Check for consistent number of devices per host.
       if (gpu_topology.num_devices_per_host() !=
           local_topology.devices_size()) {
-        return absl::InternalError(
-            "GpuTopology doesn't support multi-host with different number of "
-            "devices per host.");
+        VLOG(3)
+            << "GpuTopology doesn't support multi-host with different number"
+               " of devices per host. Build GpuTopology only by device ids.";
+        gpu_topology.set_num_slices(-1);
+        gpu_topology.set_num_hosts_per_slice(-1);
+        gpu_topology.set_num_devices_per_host(-1);
+        build_by_device_ids = true;
       }
     }
 
@@ -233,17 +239,25 @@ absl::StatusOr<GpuTopologyProto> BuildGpuTopology(
     }
   }
 
-  gpu_topology.set_num_slices(slice_id_to_node_ids.size());
-  gpu_topology.set_num_hosts_per_slice(
-      slice_id_to_node_ids.begin()->second.size());
-  // Check for consistent number of hosts per slice.
-  for (const auto& [boot_id, node_ids] : slice_id_to_node_ids) {
-    if (node_ids.size() != gpu_topology.num_hosts_per_slice()) {
-      return absl::InternalError(
-          "GpuTopology doesn't support multi-host with different number of "
-          "hosts per slice.");
+  if (!build_by_device_ids) {
+    gpu_topology.set_num_slices(slice_id_to_node_ids.size());
+    gpu_topology.set_num_hosts_per_slice(
+        slice_id_to_node_ids.begin()->second.size());
+    // Check for consistent number of hosts per slice.
+    for (const auto& [boot_id, node_ids] : slice_id_to_node_ids) {
+      if (node_ids.size() != gpu_topology.num_hosts_per_slice()) {
+        VLOG(3) << "GpuTopology doesn't support multi-host with different "
+                   "number of "
+                   "hosts per slice. Build GpuTopology only by device ids.";
+        gpu_topology.set_num_slices(-1);
+        gpu_topology.set_num_hosts_per_slice(-1);
+        gpu_topology.set_num_devices_per_host(-1);
+        break;
+      }
     }
   }
+
+  std::sort(device_ids.begin(), device_ids.end());
   gpu_topology.mutable_device_ids()->Add(device_ids.begin(), device_ids.end());
   return gpu_topology;
 }
