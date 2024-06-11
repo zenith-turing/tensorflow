@@ -200,6 +200,7 @@ int main(int argc, char** argv) {
           LOG(QFATAL) << "Failed to deserialize input literals from file "
                       << opts.input_literals_file << "\n";
         }
+        input_literals_proto.clear_iterations();
         *input_literals_proto.add_iterations() = iteration_literals_proto;
       }
     }
