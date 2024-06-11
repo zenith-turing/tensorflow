@@ -191,6 +191,9 @@ class IfrtServingExecutable {
 
   bool is_frozen_ ABSL_GUARDED_BY(mutex_) = false;
 
+  // Record the number of runs on `program_id_`.
+  int run_count_ ABSL_GUARDED_BY(mutex_) = 0;
+
   // Asynchronously load the restored variable tensors to Ifrt array.
   absl::Status AsyncLoadIfrtArray(
       absl::Span<const tensorflow::Tensor> inputs,

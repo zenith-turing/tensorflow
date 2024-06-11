@@ -518,8 +518,20 @@ absl::StatusOr<std::vector<tensorflow::Tensor>> IfrtServingExecutable::Execute(
   tsl::DeviceReservation device_reservation(kNoCoreSelectedIndex, nullptr);
   std::vector<xla ::ifrt::Device*> devices;
   if (UsePortableExecution(compile_metadata)) {
-    device_reservation =
-        ifrt_serving_core_selector_->ReserveDevice(program_id_);
+    {
+      absl::MutexLock lock(&mutex_);
+      // Iterate each core for warmup executions.
+      if (run_count_ < ifrt_client_->addressable_device_count()) {
+        // This DeviceReservation isn't made through the core selector, so set
+        // the selector to nullptr.
+        device_reservation =
+            tsl::DeviceReservation(run_count_, /*selector=*/nullptr);
+      } else {
+        device_reservation =
+            ifrt_serving_core_selector_->ReserveDevice(program_id_);
+      }
+      run_count_++;
+    }
     // Clear device_assignment because portable execution doesn't allow device
     // assignment.
     compile_metadata.clear_device_assignment();
@@ -627,7 +639,6 @@ absl::StatusOr<std::vector<tensorflow::Tensor>> IfrtServingExecutable::Execute(
                             device_list, thread_pool_));
     outputs.push_back(std::move(tensor));
   }
-
   return outputs;
 }
 

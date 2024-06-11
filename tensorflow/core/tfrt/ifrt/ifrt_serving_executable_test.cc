@@ -44,6 +44,7 @@ limitations under the License.
 #include "tensorflow/core/tfrt/ifrt/ifrt_serving_executable_test_util.h"
 #include "tsl/framework/serving_device_selector.h"
 #include "tsl/framework/test_util/mock_serving_device_selector.h"
+#include "tsl/lib/core/status_test_util.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/threadpool.h"
@@ -68,13 +69,6 @@ struct VariableInputTestParam {
 };
 using VariableInputTest = ::testing::TestWithParam<VariableInputTestParam>;
 
-const tsl::thread::ThreadPool& GetThreadPool() {
-  constexpr int kMaxParallelism = 16;
-  static auto* const thread_pool =
-      new tsl::thread::ThreadPool(tsl::Env::Default(), tsl::ThreadOptions(),
-                                  "IfrtSharding", kMaxParallelism);
-  return *thread_pool;
-}
 class IfrtServingExecutableTest : public ::testing::Test {
  protected:
   explicit IfrtServingExecutableTest() {
@@ -103,9 +97,12 @@ TEST_F(IfrtServingExecutableTest, Basic) {
   auto y = AsTensor<int32_t>({1, 2, 3}, tensorflow::TensorShape({3, 1}));
   std::vector<tensorflow::Tensor> inputs{x, y};
 
+  // Iterate over all cores first for warmup execution.
+  for (int i = 0; i < xla::ifrt::test_util::kDefaultCpuCoreCount; i++) {
+    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs), {}).status());
+  }
   TF_ASSERT_OK_AND_ASSIGN(auto result,
                           executable->Execute(absl::MakeSpan(inputs), {}));
-
   const auto expected_out =
       AsTensor<int32_t>({14}, tensorflow::TensorShape({1, 1}));
 
@@ -136,6 +133,10 @@ TEST_F(IfrtServingExecutableTest, MultipleShapes) {
   std::vector<tensorflow::Tensor> inputs2{x2, y2};
 
   std::vector<tensorflow::Tensor> outputs1, outputs2;
+  // Iterate over all cores first for warmup execution.
+  for (int i = 0; i < xla::ifrt::test_util::kDefaultCpuCoreCount; i++) {
+    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs1), {}).status());
+  }
   for (int i = 0; i < 3; i++) {
     TF_ASSERT_OK_AND_ASSIGN(outputs1,
                             executable->Execute(absl::MakeSpan(inputs1), {}));
@@ -166,6 +167,9 @@ TEST_F(IfrtServingExecutableTest, ReturnFailOnUncompiledShapeAfterFrozen) {
       AsTensor<int32_t>({14}, tensorflow::TensorShape({1, 1}));
   std::vector<tensorflow::Tensor> inputs1{x1, y1};
   std::vector<tensorflow::Tensor> outputs1;
+  for (int i = 0; i < xla::ifrt::test_util::kDefaultCpuCoreCount; i++) {
+    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs1), {}).status());
+  }
   TF_ASSERT_OK_AND_ASSIGN(outputs1,
                           executable->Execute(absl::MakeSpan(inputs1), {}));
 
@@ -256,6 +260,10 @@ TEST_F(IfrtServingExecutableTest, NoReturn) {
   auto x = AsTensor<int32_t>({1, 2, 3}, tensorflow::TensorShape({1, 3}));
   auto y = AsTensor<int32_t>({1, 2, 3}, tensorflow::TensorShape({3, 1}));
   std::vector<tensorflow::Tensor> inputs{x, y};
+  // Iterate over all cores first for warmup execution.
+  for (int i = 0; i < xla::ifrt::test_util::kDefaultCpuCoreCount; i++) {
+    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs), {}).status());
+  }
 
   TF_ASSERT_OK_AND_ASSIGN(auto result,
                           executable->Execute(absl::MakeSpan(inputs), {}));
@@ -304,6 +312,13 @@ TEST_P(VariableInputTest, InterleaveVariable) {
   }
 
   ASSERT_EQ(inputs.size(), GetParam().is_variable.size());
+  // Iterate over all cores first for warmup execution.
+  for (int i = 0; i < xla::ifrt::test_util::kDefaultCpuCoreCount; i++) {
+    TF_ASSERT_OK(executable
+                     ->Execute(absl::MakeSpan(inputs),
+                               absl::MakeSpan(loaded_variable_indices))
+                     .status());
+  }
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto result,
