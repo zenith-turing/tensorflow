@@ -805,7 +805,9 @@ message DebugOptions {
 
   bool xla_gpu_shard_autotuning = 304;
 
-  // Next id: 305
+  string xla_gpu_kernel_cache_file = 305;
+
+  // Next id: 306
 
   // Extra options to pass to the compilation backend (e.g. LLVM); specific
   // interpretation of these values is left to the backend.
