@@ -22,7 +22,6 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "tensorflow/lite/builtin_op_data.h"
 #include "tensorflow/lite/builtin_ops.h"
-#include "tensorflow/lite/core/c/c_api_types.h"
 #include "tensorflow/lite/tools/versioning/op_signature.h"
 
 namespace tflite {
@@ -517,41 +516,29 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig) {
       return absl::OkStatus();
     }
 
-    case kTfLiteBuiltinCast: {
+    case kTfLiteBuiltinCast:
       RETURN_IF_ERROR(CheckInputsOutputs(op_sig,
                                          /*required_runtime_inputs=*/1,
                                          /*required_outputs=*/1));
-      bool input_type_is_supported = false;
-      bool output_type_is_supported = false;
-      if (op_sig.inputs.at(0).type == kTfLiteBool ||
-          op_sig.inputs.at(0).type == kTfLiteFloat32 ||
-          op_sig.inputs.at(0).type == kTfLiteInt8 ||
-          op_sig.inputs.at(0).type == kTfLiteUInt8 ||
-          op_sig.inputs.at(0).type == kTfLiteInt16 ||
-          op_sig.inputs.at(0).type == kTfLiteUInt16 ||
-          op_sig.inputs.at(0).type == kTfLiteInt32 ||
-          op_sig.inputs.at(0).type == kTfLiteUInt32) {
-        input_type_is_supported = true;
-      }
-      if (op_sig.outputs.at(0).type == kTfLiteBool ||
-          op_sig.outputs.at(0).type == kTfLiteFloat32 ||
-          op_sig.outputs.at(0).type == kTfLiteInt8 ||
-          op_sig.outputs.at(0).type == kTfLiteUInt8 ||
-          op_sig.outputs.at(0).type == kTfLiteInt16 ||
-          op_sig.outputs.at(0).type == kTfLiteUInt16 ||
-          op_sig.outputs.at(0).type == kTfLiteInt32 ||
-          op_sig.outputs.at(0).type == kTfLiteUInt32) {
-        output_type_is_supported = true;
-      }
-
-      if (input_type_is_supported && output_type_is_supported) {
+      if (op_sig.inputs.at(0).type == kTfLiteBool &&
+          (op_sig.outputs.at(0).type == kTfLiteFloat16 ||
+           op_sig.outputs.at(0).type == kTfLiteFloat32)) {
         return absl::OkStatus();
-      }
+      } else if ((op_sig.inputs.at(0).type == kTfLiteFloat16 ||
+                  op_sig.inputs.at(0).type == kTfLiteFloat32) &&
+                 op_sig.outputs.at(0).type == kTfLiteBool) {
+        return absl::OkStatus();
+      } else if ((op_sig.inputs.at(0).type == kTfLiteFloat32 ||
+                  op_sig.inputs.at(0).type == kTfLiteInt32) &&
+                 (op_sig.outputs.at(0).type == kTfLiteFloat32 ||
+                  op_sig.outputs.at(0).type == kTfLiteInt32)) {
+        return absl::OkStatus();
+      } else {
         return absl::UnimplementedError(absl::StrCat(
             "Not supported Cast case. Input type: ",
             TfLiteTypeGetName(op_sig.inputs.at(0).type), " and output type: ",
             TfLiteTypeGetName(op_sig.outputs.at(0).type)));
-    }
+      }
 
     case kTfLiteBuiltinConcatenation: {
       const TfLiteConcatenationParams* tf_options;
@@ -617,9 +604,15 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig) {
             "DynamicUpdateSlice requires 3 inputs.");
       }
       OpSignatureTensorSpec array_to_update = op_sig.inputs[0];
-      if (array_to_update.dims.size() != 4) {
+      OpSignatureTensorSpec start_indices = op_sig.inputs[2];
+      if (array_to_update.dims.size() == 4 && array_to_update.dims[0] != 1) {
         return absl::UnimplementedError(
-            "DynamicUpdateSlice only supports 4D array_to_update.");
+            "DynamicUpdateSlice only support 4D operand with batch size 1.");
+      }
+
+      if (start_indices.dims.size() > 1) {
+        return absl::UnimplementedError(
+            "DynamicUpdateSlice only support 1D start_indices.");
       }
       return absl::OkStatus();
     }
