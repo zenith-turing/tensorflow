@@ -56,9 +56,7 @@ class CuptiTraceCollector {
   // After CuptiTracer stop, collected per-thread callback data from threads
   // will be send here. Default behavior are: a) create merged annotation map
   // (for later activity event usage), and b) direct add all event by calling
-  // AddEvent(). Yet collector could just save those callback events without
-  // processing now, but merge annotation and AddEvent() later when needed, such
-  // as during export(). If need_callback_events is false, only annotation map
+  // AddEvent(). If need_callback_events is false, only annotation map
   // will be merged, all events will be dropped.
   virtual void OnTracerCollectedCallbackData(
       std::vector<CallbackAnnotationsAndEvents> callback_events,
@@ -68,10 +66,6 @@ class CuptiTraceCollector {
   // After tracing stop, the cached activity buffers will be send here.
   // Default behavior is direct process those cached activity events and
   // add it into this class by calling AddEvent().
-  // Yet collector could just save activity buffers without processing here,
-  // but process and AddEvent() later when needed, such as during export().
-  // This could make the profiling stop() timestamp, if used by upper
-  // level wrapper, do not contains time used by exporting events.
   virtual void OnTracerCachedActivityBuffers(
       std::unique_ptr<CuptiActivityBufferManager> activity_buffers);
 
@@ -82,16 +76,23 @@ class CuptiTraceCollector {
   }
   virtual std::string ReportNumEventsIfDropped() { return ""; }
 
+  // Set by the cupti tracer right after tracing is stopped.
+  void SetTracingEndTimeNs(uint64_t end_time_ns) {
+    tracing_end_time_ns_ = end_time_ns;
+  }
+
+  uint64_t GetTracingEndTimeNs() const { return tracing_end_time_ns_; }
+
   AnnotationMap* annotation_map() { return &annotation_map_; }
 
   const CuptiTracerCollectorOptions& GetOptions() const { return options_; }
 
  protected:
   CuptiTracerCollectorOptions options_;
-  bool need_callback_events_ = false;
 
  private:
   AnnotationMap annotation_map_;
+  uint64_t tracing_end_time_ns_ = 0;
 
   CuptiTraceCollector(const CuptiTraceCollector&) = delete;
   void operator=(const CuptiTraceCollector&) = delete;

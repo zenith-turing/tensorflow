@@ -962,6 +962,11 @@ void CuptiTracer::Disable() {
   Finalize().IgnoreError();
   cupti_driver_api_hook_->SyncAndFlush().IgnoreError();
 
+  collector_->SetTracingEndTimeNs(GetTimestamp());
+
+  // The callback API events must be processed before activity API buffers
+  // because the AnnotationMap is populated from the callback API events and
+  // queried by the activity API events.
   collector_->OnTracerCollectedCallbackData(
       GatherCallbackAnnotationsAndEvents(),
       option_.has_value() ? option_->required_callback_api_events : false);

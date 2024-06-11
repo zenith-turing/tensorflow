@@ -607,29 +607,9 @@ class CuptiTraceCollectorImpl : public CuptiTraceCollector {
     dropped_events_[reason] += num_events;
   }
 
-  void OnTracerCollectedCallbackData(
-      std::vector<CallbackAnnotationsAndEvents> callback_events,
-      bool need_callback_events) override {
-    callback_events_ = std::move(callback_events);
-    need_callback_events_ = need_callback_events;
-  }
-
-  void OnTracerCachedActivityBuffers(
-      std::unique_ptr<CuptiActivityBufferManager> activity_buffers) override {
-    activity_buffers_ = std::move(activity_buffers);
-  }
-
   void Flush() override {}
   // Returns true if some GPU events are captured.
   bool Export(XSpace* space, uint64_t end_gpu_ns) override {
-    // The callback API events must be processed before activity API buffers
-    // because the AnnotationMap is populated from the callback API events and
-    // queried by the activity API events.
-    CuptiTraceCollector::OnTracerCollectedCallbackData(
-        std::move(callback_events_), need_callback_events_);
-    CuptiTraceCollector::OnTracerCachedActivityBuffers(
-        std::move(activity_buffers_));
-
     LOG(INFO) << " GpuTracer has collected " << num_callback_events_
               << " callback api events and " << num_activity_events_
               << " activity events. " << ReportDroppedEvents();
@@ -680,8 +660,6 @@ class CuptiTraceCollectorImpl : public CuptiTraceCollector {
  private:
   size_t num_callback_events_ = 0;
   size_t num_activity_events_ = 0;
-  std::unique_ptr<CuptiActivityBufferManager> activity_buffers_;
-  std::vector<CallbackAnnotationsAndEvents> callback_events_;
   absl::flat_hash_map<std::string, uint64_t> dropped_events_;
   uint64_t start_walltime_ns_;
   uint64_t start_gpu_ns_;
