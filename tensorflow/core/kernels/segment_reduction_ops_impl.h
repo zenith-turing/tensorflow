@@ -18,8 +18,16 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_KERNELS_SEGMENT_REDUCTION_OPS_IMPL_H_
 #define TENSORFLOW_CORE_KERNELS_SEGMENT_REDUCTION_OPS_IMPL_H_
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
+#include <vector>
 
+#include "absl/log/check.h"
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "tensorflow/core/framework/op_requires.h"
 #include "tensorflow/core/platform/types.h"
 #define EIGEN_USE_THREADS
@@ -35,11 +43,13 @@ limitations under the License.
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/tensor_types.h"
 #include "tensorflow/core/framework/tensor_util.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/segment_reduction_ops.h"
 #include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/core/platform/bfloat16.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/util/determinism.h"
 #include "tensorflow/core/util/util.h"
@@ -65,6 +75,7 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
 
 namespace internal {
+
 Status ValidateSegmentReduction(OpKernelContext* c, const Tensor& input,
                                 const Tensor& segment_ids);
 Status ValidateUnsortedSegmentReduction(OpKernel* op_kernel,
@@ -590,7 +601,8 @@ class SparseSegmentReductionOpBase : public OpKernel {
                 errors::InvalidArgument("segment ids must be >= 0"));
 
     TensorShape output_shape = input.shape();
-    OP_REQUIRES_OK(context, output_shape.SetDimWithStatus(0, output_rows));
+    OP_REQUIRES_OK(
+        context, output_shape.SetDimWithStatus(/*d=*/0, /*size=*/output_rows));
 
     // Note that we do not initialize the output buffer with a default value, so
     // we need to explicitly set missing indices to the default value.
@@ -606,9 +618,14 @@ class SparseSegmentReductionOpBase : public OpKernel {
                 errors::InvalidArgument("segment ids must be >= 0"));
     auto output_flat = output->flat_outer_dims<T>();
 
+    // If we use DT_BFLOAT16 or DT_HALF, we need to use DT_FLOAT for
+    // accumulation. We create a temp tensor to perform this accumulation for
+    // every segment.
     Tensor temp;
     if (input.dtype() == DT_BFLOAT16 || input.dtype() == DT_HALF) {
-      temp = tensorflow::Tensor(DT_FLOAT, output_shape);
+      TensorShape temp_shape = output_shape;
+      OP_REQUIRES_OK(context, temp_shape.SetDimWithStatus(/*d=*/0, /*size=*/1));
+      temp = tensorflow::Tensor(DT_FLOAT, temp_shape);
     }
     auto temp_flat = temp.flat_outer_dims<float>();
 
@@ -650,7 +667,7 @@ class SparseSegmentReductionOpBase : public OpKernel {
       }
 
       auto out = output_flat.template chip<0>(out_index);
-      auto temp = temp_flat.template chip<0>(out_index);
+      auto temp = temp_flat.template chip<0>(0);
       const int bad_offset = Reduce<T, Index>(input_flat, indices_vec, start,
                                               end - start, out, temp);
       OP_REQUIRES(context, bad_offset < 0,
@@ -678,6 +695,7 @@ class SparseSegmentReductionOpBase : public OpKernel {
 
  private:
   const DataType dtidx_;
+
   template <typename Tin>
   using EnableIfBfloat16OrHalf =
       typename std::enable_if<std::is_same<Tin, bfloat16>::value ||
@@ -1271,9 +1289,9 @@ class SparseSegmentGradOpBase : public OpKernel {
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output));
     if (M == 0 || N == 0) return;
 
-    auto output_flat = output->flat_outer_dims<T>();
     functor::SparseSegmentGradFunctor<Device, T, Index, SegmentId>()(
-        context, operation_, input_flat, indices_vec, segment_vec, output_flat);
+        context, operation_, input_flat, indices_vec, segment_vec,
+        output->flat_outer_dims<T>());
   }
 
  private:
