@@ -1715,6 +1715,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "xla_use_shardonnay",
       bool_setter_for(&DebugOptions::set_xla_use_shardonnay),
       debug_options->xla_use_shardonnay(), "Whether to use Shardonnay."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_kernel_cache_file",
+      string_setter_for(&DebugOptions::set_xla_gpu_kernel_cache_file),
+      debug_options->xla_gpu_kernel_cache_file(),
+      "Path to a file to cache compiled kernels. If the file doesn't exist "
+      "write the compilation cache of the first compiled HLO module into it."
+      "Once the file exists, further compilations will read it to reuse "
+      "the kernels, but not write it. This behavior may change later."));
 }  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more
