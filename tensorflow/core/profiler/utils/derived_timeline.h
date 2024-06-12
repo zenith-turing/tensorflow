@@ -145,6 +145,10 @@ void GenerateDerivedTimeLines(
 // from device_trace.
 void DeriveLinesFromStats(tensorflow::profiler::XPlane* device_trace);
 
+// Devices Framework Op and Module lines for XLA:CPU ops.
+// This function will
+void DeriveLinesForXlaCpuOps(tensorflow::profiler::XPlane* host_trace);
+
 }  // namespace profiler
 }  // namespace tensorflow
 
