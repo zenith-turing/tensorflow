@@ -713,6 +713,15 @@ def tf_gen_op_wrapper_cc(
                 ") | cut -d\" \" -f1))",
             )
         api_def_args_str = ",".join(api_def_args)
+    
+    # print("++++++ 1 ++++++ ", tool)
+    # print("++++++ 2 ++++++ ", include_internal_ops)
+
+    # print("++++++ 3 ++++++ ", srcs)
+    # ccmd = ("$(location :" + tool + ") $(location :" + out_ops_file + ".h) " +
+    #            "$(location :" + out_ops_file + ".cc) " +
+    #            str(include_internal_ops) + " " + api_def_args_str)
+    # print("++++++ 4 ++++++ ", ccmd)
 
     native.genrule(
         name = name + "_genrule",

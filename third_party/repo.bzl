@@ -22,7 +22,9 @@ def _is_windows(ctx):
     return ctx.os.name.lower().find("windows") != -1
 
 def _wrap_bash_cmd(ctx, cmd):
+    print("DDDDDD", cmd)
     if _is_windows(ctx):
+        print("DDDDDD, _is_windows")
         bazel_sh = _get_env_var(ctx, "BAZEL_SH")
         if not bazel_sh:
             fail("BAZEL_SH environment variable is not set")
@@ -49,6 +51,7 @@ def _use_system_lib(ctx, name):
 def _execute_and_check_ret_code(repo_ctx, cmd_and_args):
     result = repo_ctx.execute(cmd_and_args, timeout = 60)
     if result.return_code != 0:
+        print("ERRRRRRR, ", result)
         fail(("Non-zero return code({1}) when executing '{0}':\n" + "Stdout: {2}\n" +
               "Stderr: {3}").format(
             " ".join(cmd_and_args),
@@ -66,7 +69,8 @@ def _apply_patch(ctx, patch_file):
     if _is_windows(ctx):
         patch_command = ["patch", "-p1", "-d", ctx.path("."), "-i", ctx.path(patch_file)]
     else:
-        patch_command = ["git", "apply", "-v", ctx.path(patch_file)]
+        patch_command = ["git", "apply", "-v", str(ctx.path(patch_file).realpath)]
+    # print("=-------= type of path_prefix: ", str(ctx.path(patch_file)))
     cmd = _wrap_bash_cmd(ctx, patch_command)
     _execute_and_check_ret_code(ctx, cmd)
 
@@ -101,6 +105,7 @@ def _tf_http_archive(ctx):
         if ctx.attr.delete:
             _apply_delete(ctx, ctx.attr.delete)
         if ctx.attr.patch_file != None:
+            print("DDDDDD", ctx.attr.patch_file )
             _apply_patch(ctx, ctx.attr.patch_file)
 
     if use_syslib and ctx.attr.system_build_file != None:

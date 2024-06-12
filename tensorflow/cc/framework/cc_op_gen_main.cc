@@ -52,6 +52,35 @@ void PrintAllCCOps(const std::string& dot_h, const std::string& dot_cc,
   WriteCCOps(ops, api_def_map, dot_h, dot_cc);
 }
 
+void PrintCCOps(const std::string& dot_h, const std::string& dot_cc,
+                bool include_internal,
+                const std::vector<string>& api_def_dirs) {
+  OpList ops;
+  OpList to_print_ops;
+  OpRegistry::Global()->Export(include_internal, &ops);
+  ApiDefMap api_def_map(ops);
+  if (!api_def_dirs.empty()) {
+    Env* env = Env::Default();
+    auto newops = to_print_ops.mutable_op();
+    // Only load files that correspond to "ops".
+    for (const auto& op : ops.op()) {
+      for (const auto& api_def_dir : api_def_dirs) {
+        const std::string api_def_file_pattern =
+            io::JoinPath(api_def_dir, "api_def_" + op.name() + ".pbtxt");
+        if (env->FileExists(api_def_file_pattern).ok()) {
+          *newops->Add() = op;
+          LOG(INFO) << "Write OP : " << op.name();
+          TF_CHECK_OK(api_def_map.LoadFile(env, api_def_file_pattern));
+        }
+      }
+    }
+  }
+
+  api_def_map.UpdateDocs();
+
+  WriteCCOps(to_print_ops, api_def_map, dot_h, dot_cc);
+}
+
 }  // namespace
 }  // namespace tensorflow
 
@@ -70,8 +99,20 @@ int main(int argc, char* argv[]) {
   }
 
   bool include_internal = tensorflow::StringPiece("1") == argv[3];
+  bool all_ops = false;
+  if (argc > 5) {
+    all_ops = tensorflow::StringPiece("1") == argv[5];
+  }
   std::vector<tensorflow::string> api_def_dirs = tensorflow::str_util::Split(
       argv[4], ",", tensorflow::str_util::SkipEmpty());
-  tensorflow::PrintAllCCOps(argv[1], argv[2], include_internal, api_def_dirs);
+  // if (all_ops) {
+  //   LOG(INFO) << "Print ALL CC ops!";
+  //   tensorflow::PrintAllCCOps(argv[1], argv[2], include_internal,
+  //   api_def_dirs);
+  // } else {
+  LOG(INFO) << "Print CC ops!";
+  tensorflow::PrintCCOps(argv[1], argv[2], include_internal, api_def_dirs);
+  // }
+
   return 0;
 }
